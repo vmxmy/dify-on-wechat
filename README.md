@@ -18,7 +18,7 @@
 1.  **增强型 Web UI (`web_ui.py`)** 🖥️
     *   **实时日志输出:** 直接在 Web UI 中监控机器人活动。
     *   **配置编辑器:** 通过界面方便地修改 `config.json` 设置。
-        *   _[/doc/images/WebUI-Dify-on-WeChat-04-23-2025_12_25_AM.png]_*
+        *   ![webui](/doc/images/WebUI-Dify-on-WeChat-04-23-2025_12_25_AM.png)_*
     *   **安全访问:** 直接在 `config.json` 中为 Web UI 设置用户名和密码。
         *   _[图片占位符: 登录配置截图]_*
     *   **访问端口:** 默认本机端口 7860, 可以通过 `--public` 参数使用 Gradio 提供的临时域名地址。
