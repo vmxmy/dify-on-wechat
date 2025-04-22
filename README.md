@@ -1,4 +1,3 @@
-  < alt="Dify on WeChat Logo" width="150"/>
   <h1>Dify on WeChat (增强版 Fork)</h1>
   <p>
     本项目是 <a href="https://github.com/hanfangyuan4396/dify-on-wechat">dify-on-wechat</a> 的一个增强版分支，集成了多项实用的修改。
