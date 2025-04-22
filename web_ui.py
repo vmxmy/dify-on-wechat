@@ -4,6 +4,9 @@ import signal
 import time
 import requests
 from logging import getLogger
+import subprocess
+import collections
+import json
 
 import gradio as gr
 
@@ -14,6 +17,9 @@ from plugins import *
 
 logger = getLogger(__name__)
 current_process_instance = None
+
+# --- 配置常量 ---
+CONFIG_FILE_PATH = 'config.json'
 
 def check_gewechat_online():
     """检查gewechat用户是否在线
@@ -203,43 +209,40 @@ def verify_login(username, password):
 def login(username, password):
     if verify_login(username, password):
         # 获取用户信息
-        nickname = None
-        avatar_path = None
+        nickname, avatar_path = None, None
         is_gewechat = conf().get("channel_type") == "gewechat"
-        
         if is_gewechat:
             nickname, avatar_path = get_gewechat_profile()
-            
-        # 根据不同情况决定显示二维码还是头像
         show_qrcode = not (is_gewechat and avatar_path)
-        
-        # 设置状态信息
         status_text = "启动成功😀 " + (f"[{nickname}]🤖  已在线✅" if nickname else "")
             
         return (
-            gr.update(visible=True, value=status_text),  # 在顶部状态栏显示状态
-            gr.update(visible=show_qrcode),  # 只在非gewechat或gewechat未登录时显示二维码
-            gr.update(visible=True), 
-            gr.update(visible=show_qrcode),  # 刷新二维码按钮也只在显示二维码时可见
-            gr.update(visible=False),  # Hide username input
-            gr.update(visible=False),  # Hide password input
-            gr.update(visible=False),   # Hide login button
-            gr.update(value=avatar_path, visible=bool(avatar_path)),  # 只在有头像时显示
-            gr.update(visible=False),  # Hide login form group
-            gr.update(visible=True)  # Show control group
+            gr.update(visible=True, value=status_text),  # login_status
+            gr.update(visible=show_qrcode),             # qrcode_image visibility
+            gr.update(visible=True),                    # restart_button visibility
+            gr.update(visible=show_qrcode),             # refresh_qrcode_button visibility
+            gr.update(visible=False),                   # username_input
+            gr.update(visible=False),                   # password_input
+            gr.update(visible=False),                   # login_button
+            gr.update(value=avatar_path, visible=bool(avatar_path)), # user_avatar
+            gr.update(visible=False),                   # login_form
+            gr.update(visible=True),                    # control_group
+            gr.update(visible=True)                     # <<-- protected_content_area
         )
     else:
+        # 登录失败时，确保受保护区域也是隐藏的
         return (
-            gr.update(visible=True, value="用户名或密码错误"),
-            gr.update(visible=False), 
-            gr.update(visible=False), 
-            gr.update(visible=False),
-            gr.update(visible=True),   # Show username input
-            gr.update(visible=True),   # Show password input
-            gr.update(visible=True),   # Show login button
-            gr.update(visible=False),   # Hide avatar
-            gr.update(visible=True),  # Show login form group
-            gr.update(visible=False)  # Hide control group
+            gr.update(visible=True, value="用户名或密码错误"), # login_status
+            gr.update(visible=False),                   # qrcode_image
+            gr.update(visible=False),                   # restart_button
+            gr.update(visible=False),                   # refresh_qrcode_button
+            gr.update(visible=True),                    # username_input
+            gr.update(visible=True),                    # password_input
+            gr.update(visible=True),                    # login_button
+            gr.update(visible=False),                   # user_avatar
+            gr.update(visible=True),                    # login_form
+            gr.update(visible=False),                   # control_group
+            gr.update(visible=False)                    # <<-- protected_content_area
         )
 
 def logout():
@@ -251,13 +254,16 @@ def logout():
         # 检查是否是 gewechat 且在线
         if conf().get("channel_type") != "gewechat" or not check_gewechat_online()[0]:
             return (
-                gr.update(value="非gewechat或不在线，无需退出登录😭"), # 状态
-                gr.update(visible=True), # 刷新二维码按钮
-                gr.update(visible=True), # 刷新状态按钮
-                gr.update(visible=True), # 重启按钮
-                gr.update(visible=False), # 退出按钮
-                gr.update(visible=True, value=get_qrcode_image()), # 二维码
-                gr.update(visible=False) # 头像
+                gr.update(value="非gewechat或不在线，无需退出登录"), # login_status
+                gr.update(visible=True), # refresh_qrcode_button
+                gr.update(visible=True), # refresh_login_status_button
+                gr.update(visible=True), # restart_button
+                gr.update(visible=False),# logout_button
+                gr.update(visible=True, value=get_qrcode_image()), # qrcode_image
+                gr.update(visible=False), # user_avatar
+                gr.update(visible=True),  # login_form
+                gr.update(visible=False), # control_group
+                gr.update(visible=False) # <<-- protected_content_area
             )
 
         # 调用 gewechat 退出接口
@@ -267,13 +273,21 @@ def logout():
         app_id = conf().get("gewechat_app_id")
         if not all([base_url, token, app_id]):
             return (
-                gr.update(value="gewechat配置不完整，无法退出登录😭"), # 状态
-                gr.update(visible=False), # 刷新二维码按钮
-                gr.update(visible=True), # 刷新状态按钮
-                gr.update(visible=True), # 重启按钮
-                gr.update(visible=True), # 退出按钮
-                gr.update(visible=False), # 二维码
-                gr.update(visible=True) # 头像
+                gr.update(value="gewechat配置不完整，无法退出登录😭"), # login_status
+                gr.update(visible=False), # refresh_qrcode_button
+                gr.update(visible=True), # refresh_login_status_button
+                gr.update(visible=True), # restart_button
+                gr.update(visible=True), # logout_button
+                gr.update(visible=False), # qrcode_image
+                gr.update(visible=True), # user_avatar
+                gr.update(visible=False), # login_form
+                gr.update(visible=True),  # control_group
+                gr.update(visible=False), # logout_button
+                gr.update(visible=False), # qrcode_image
+                gr.update(visible=True),  # user_avatar
+                gr.update(visible=False), # login_form
+                gr.update(visible=True),  # control_group
+                gr.update(visible=False) # <<-- protected_content_area
             )
         
         client = GewechatClient(base_url, token)
@@ -282,35 +296,49 @@ def logout():
         if not result or result.get('ret') != 200:
             logger.error(f"退出登录失败 {result}")
             return (
-                gr.update(value=f"退出登录失败😭 {result}, 请重试"), # 状态
-                gr.update(visible=False), # 刷新二维码按钮
-                gr.update(visible=True), # 刷新状态按钮
-                gr.update(visible=True), # 重启按钮
-                gr.update(visible=True), # 退出按钮
-                gr.update(visible=False), # 二维码
-                gr.update(visible=True) # 头像
+                gr.update(value=f"退出登录失败 {result}, 请重试"), # login_status
+                gr.update(visible=False), # refresh_qrcode_button
+                gr.update(visible=True), # refresh_login_status_button
+                gr.update(visible=True), # restart_button
+                gr.update(visible=True), # logout_button
+                gr.update(visible=False), # qrcode_image
+                gr.update(visible=True), # user_avatar
+                gr.update(visible=False), # login_form
+                gr.update(visible=True),  # control_group
+                gr.update(visible=True),  # logout_button
+                gr.update(visible=False), # qrcode_image
+                gr.update(visible=True),  # user_avatar
+                gr.update(visible=False), # login_form
+                gr.update(visible=True),  # control_group
+                gr.update(visible=False) # <<-- protected_content_area
             )
 
         return (
-            gr.update(value="退出登录成功😀 点击重启服务按钮可重新登录"), # 状态
-            gr.update(visible=False), # 刷新二维码按钮
-            gr.update(visible=False), # 刷新状态按钮
-            gr.update(visible=True, variant="primary"), # 重启按钮
-            gr.update(visible=False), # 退出按钮
-            gr.update(visible=False), # 二维码
-            gr.update(visible=False) # 头像
+            gr.update(value="退出登录成功😀 点击重启服务按钮可重新登录"), # login_status
+            gr.update(visible=False), # refresh_qrcode_button
+            gr.update(visible=False), # refresh_login_status_button
+            gr.update(visible=True, variant="primary"), # restart_button
+            gr.update(visible=False), # logout_button
+            gr.update(visible=False), # qrcode_image
+            gr.update(visible=False), # user_avatar
+            gr.update(visible=True),  # login_form
+            gr.update(visible=False), # control_group
+            gr.update(visible=False) # <<-- protected_content_area
         )
         
     except Exception as e:
         logger.error(f"退出登录出错: {str(e)}")
         return (
-            gr.update(value=f"退出登录失败😭 {str(e)}"), # 状态
-            gr.update(visible=False), # 刷新二维码 按钮
-            gr.update(visible=True), # 刷新状态按钮
-            gr.update(visible=True), # 重启按钮
-            gr.update(visible=True), # 退出按钮
-            gr.update(visible=False), # 二维码
-            gr.update(visible=True) # 头像
+            gr.update(value=f"退出登录失败😭 {str(e)}"), # login_status
+            gr.update(visible=False), # refresh_qrcode_button
+            gr.update(visible=True), # refresh_login_status_button
+            gr.update(visible=True), # restart_button
+            gr.update(visible=True), # logout_button
+            gr.update(visible=False), # qrcode_image
+            gr.update(visible=True), # user_avatar
+            gr.update(visible=False), # login_form
+            gr.update(visible=True),  # control_group
+            gr.update(visible=False) # <<-- protected_content_area
         )
 
 def show_logout_confirm():
@@ -374,6 +402,88 @@ def refresh_login_status():
             gr.update(visible=True),
             gr.update(visible=False)
         )
+
+def get_log_tail(log_file='run.log', lines=50):
+    """获取日志文件末尾指定行数的内容"""
+    try:
+        # 检查文件是否存在
+        if not os.path.exists(log_file):
+            return f"错误：日志文件 '{log_file}' 未找到。"
+        
+        # 使用 tail 命令获取日志
+        # 注意：这在 Windows 上可能无效，需要替代方案（如读取文件）
+        # 确保 tail 命令存在
+        result = subprocess.run(['which', 'tail'], capture_output=True, text=True)
+        if result.returncode != 0:
+             # Windows 或无 tail 命令的替代方案：读取文件最后 N 行
+             try:
+                 with open(log_file, 'r', encoding='utf-8') as f:
+                     # 使用 deque 高效获取末尾行
+                     log_lines = collections.deque(f, maxlen=lines)
+                     return "\n".join(log_lines)
+             except Exception as e:
+                 logger.error(f"读取日志文件失败: {e}")
+                 return f"错误：无法读取日志文件 '{log_file}'。错误: {e}"
+
+        # 使用 tail 命令 (Linux/macOS)
+        result = subprocess.run(['tail', '-n', str(lines), log_file],
+                                capture_output=True, text=True, check=False)
+                                
+        if result.returncode == 0:
+            return result.stdout
+        else:
+            # 即使 tail 失败，也尝试读取文件
+             try:
+                 with open(log_file, 'r', encoding='utf-8') as f:
+                     log_lines = collections.deque(f, maxlen=lines)
+                     return "\n".join(log_lines)
+             except Exception as e:
+                 logger.error(f"tail命令失败后读取日志文件也失败: {e}")
+                 return f"错误: tail命令执行失败({result.returncode}) 且无法读取日志文件。错误: {result.stderr}"
+            
+    except Exception as e:
+        logger.error(f"获取日志时发生意外错误: {str(e)}")
+        return f"获取日志时发生意外错误: {str(e)}"
+
+def get_config_content():
+    """读取 config.json 文件内容"""
+    try:
+        if not os.path.exists(CONFIG_FILE_PATH):
+            return f"错误: 配置文件 '{CONFIG_FILE_PATH}' 未找到。"
+        with open(CONFIG_FILE_PATH, 'r', encoding='utf-8') as f:
+            # 直接返回原始文本，让 gr.Code 处理
+            return f.read()
+    except Exception as e:
+        logger.error(f"读取配置文件失败: {e}")
+        return f"读取配置文件时出错: {str(e)}"
+
+def save_config_content(new_content_str):
+    """验证 JSON 格式并保存到 config.json"""
+    try:
+        # 1. 验证 JSON 格式是否有效
+        parsed_data = json.loads(new_content_str)
+    except json.JSONDecodeError as e:
+        logger.error(f"保存配置失败 - JSON 格式无效: {e}")
+        return f"保存失败: JSON 格式无效 - {str(e)}"
+    except Exception as e:
+        logger.error(f"保存配置失败 - 解析 JSON 时发生意外错误: {e}")
+        return f"保存失败: 解析 JSON 时发生意外错误 - {str(e)}"
+
+    try:
+        # 2. 格式化写入文件
+        with open(CONFIG_FILE_PATH, 'w', encoding='utf-8') as f:
+            json.dump(parsed_data, f, indent=4, ensure_ascii=False)
+        logger.info("配置文件已成功保存。")
+        return "配置已成功保存！请注意，部分更改可能需要重启主程序(app.py)才能生效。"
+    except IOError as e:
+        logger.error(f"保存配置文件到磁盘时失败: {e}")
+        return f"保存失败: 写入文件时出错 - {str(e)}"
+    except Exception as e:
+        logger.error(f"保存配置文件时发生意外错误: {e}")
+        return f"保存失败: 发生意外错误 - {str(e)}"
+
+def update_timer():
+    return time.time()
 
 with gr.Blocks(title="Dify on WeChat", theme=gr.themes.Soft(radius_size=gr.themes.sizes.radius_lg)) as demo:
     # 顶部状态栏
@@ -503,6 +613,39 @@ with gr.Blocks(title="Dify on WeChat", theme=gr.themes.Soft(radius_size=gr.theme
                     size="sm"
                 )
 
+    # 1. 先显式创建 Column 对象
+    protected_content_area = gr.Column(visible=False)
+    # 2. 使用创建的对象作为上下文管理器
+    with protected_content_area:
+        # 日志显示区域
+        with gr.Accordion("实时日志", open=False):
+            log_output = gr.Textbox(
+                label=f"日志内容 (run.log - 最后 50 行)",
+                lines=20,
+                interactive=False,
+                max_lines=20
+            )
+            timer = gr.Timer(5)
+
+        # 配置管理区域
+        with gr.Accordion("配置管理 (config.json)", open=False):
+            gr.Markdown(
+                """**警告:** 
+                直接修改 JSON 配置存在风险，可能导致程序无法启动。  
+                保存前请确保 JSON 格式严格正确 (例如，所有字符串使用双引号, 末尾无多余逗号)。  
+                修改后，通常需要**重启主程序 (app.py) 或通过 Web UI 重启服务**才能使所有更改生效。
+                """
+            )
+            config_editor = gr.Code(
+                label="config.json 内容 (可编辑)", 
+                language="json", 
+                interactive=True, 
+                lines=25
+            )
+            with gr.Row():
+                 save_config_button = gr.Button("保存配置", variant="primary")
+            config_status = gr.Textbox(label="保存状态", interactive=False)
+
     # 事件处理
     login_button.click(
         login,
@@ -517,7 +660,8 @@ with gr.Blocks(title="Dify on WeChat", theme=gr.themes.Soft(radius_size=gr.theme
             login_button,
             user_avatar,
             login_form,
-            control_group
+            control_group,
+            protected_content_area
         ]
     )
 
@@ -589,7 +733,10 @@ with gr.Blocks(title="Dify on WeChat", theme=gr.themes.Soft(radius_size=gr.theme
             restart_button,
             logout_button,
             qrcode_image,
-            user_avatar
+            user_avatar,
+            login_form,
+            control_group,
+            protected_content_area
         ]
     ).then(
         cancel_logout,  # 退出后关闭确认对话框
@@ -609,6 +756,12 @@ with gr.Blocks(title="Dify on WeChat", theme=gr.themes.Soft(radius_size=gr.theme
         ]
     )
 
+    # Timer 事件处理 (日志) 和 Config 事件处理 (引用保持不变)
+    demo.load(get_log_tail, [], log_output) 
+    timer.tick(get_log_tail, inputs=None, outputs=log_output)
+    demo.load(get_config_content, [], config_editor)
+    save_config_button.click(save_config_content, inputs=[config_editor], outputs=[config_status])
+
 if __name__ == "__main__":
     start_run()
-    demo.launch(server_name="0.0.0.0", server_port=conf().get("web_ui_port", 7860))
+    demo.launch(server_name="0.0.0.0", server_port=conf().get("web_ui_port", 7860), share=True)
