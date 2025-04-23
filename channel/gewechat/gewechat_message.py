@@ -522,12 +522,15 @@ class GeWeChatMessage(ChatMessage):
 
             # 只有在XML解析失败时才从PushContent中判断
             if not xml_parsed:
+                if self.content is None:
+                    logger.warning(f"[gewechat] self.content is None before attempting prefix removal in group chat. MsgType: {self.msg.get('Data', {}).get('MsgType', 'Unknown')}, Raw Content: {self.msg.get('Data', {}).get('Content', {}).get('string', 'N/A')}")
+                    self.content = ""
                 self.is_at = '在群聊中@了你' in self.msg.get('Data', {}).get('PushContent', '')
                 logger.debug(f"[gewechat] Parse is_at from PushContent. self.is_at: {self.is_at}")
 
             # 如果是群消息，使用正则表达式去掉wxid前缀和@信息
-            self.content = re.sub(f'{self.actual_user_id}:\n', '', self.content)  # 去掉wxid前缀
-            self.content = re.sub(r'@[^\u2005]+\u2005', '', self.content)  # 去掉@信息
+            self.content = re.sub(f'{self.actual_user_id}:\\n', '', self.content)  # 去掉wxid前缀
+            self.content = re.sub(r'@[^\\u2005]+\\u2005', '', self.content)  # 去掉@信息
         else:
             # 如果不是群聊消息，保持结构统一，也要设置actual_user_id和actual_user_nickname
             self.actual_user_id = self.other_user_id
